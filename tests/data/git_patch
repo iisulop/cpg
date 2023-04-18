@@ -1,0 +1,375 @@
+commit b8e882d50a8e2f184e8803a18818da18dbbd1469
+Author: Mr. Example <mr@example.com.com>
+Date:   Wed Apr 12 17:49:27 2023 +0300
+
+    Read stdin
+
+diff --git a/Cargo.toml b/Cargo.toml
+index a30a4b0..2175237 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -7,5 +7,6 @@ edition = "2021"
+ 
+ [dependencies]
+ crossterm = "0.26.1"
++ratatui = "0.20.1"
++regex = "1.7.3"
+ thiserror = "1.0.40"
+-tui = "0.19.0"
+diff --git a/src/main.rs b/src/main.rs
+index 61ff04b..203c02a 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -3,22 +3,16 @@ use crossterm::{
+     execute,
+     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+ };
+-use std::io;
+-use thiserror::Error;
+-use tui::{
++use ratatui::{
+     backend::{Backend, CrosstermBackend},
+-    layout::{Alignment, Constraint, Direction, Layout},
+-    style::{Color, Modifier, Style},
+-    text::Span,
+-    widgets::{Block, BorderType, Borders},
+-    Frame, Terminal,
++    layout::{Constraint, Direction, Layout},
++    widgets::{Block, BorderType, Borders, Paragraph},
++    Frame,
++    Terminal,
+ };
++use std::io::{self, stdin};
+ 
+-#[derive(Error, Debug)]
+-enum RatError {
+-    #[error("Could not initialize terminal")]
+-    IoErr(#[from] io::Error),
+-}
++use rat::{RatError, GIT_LOG, read_input};
+ 
+ fn main() -> Result<(), RatError> {
+     enable_raw_mode()?;
+@@ -46,68 +40,74 @@ fn main() -> Result<(), RatError> {
+     Ok(())
+ }
+ 
+-fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
++fn decrement(scroll: usize, count: usize) -> usize {
++    if let Some(pos) = scroll.checked_sub(count) {
++        pos
++    } else {
++        0
++    }
++}
++
++fn increment(scroll: usize, count: usize) -> usize {
++    if let Some(pos) = scroll.checked_add(count ) {
++        pos
++    } else {
++        usize::MAX
++    }
++}
++
++fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), RatError> {
++    let mut start_pos: usize = 0;
++    let input = stdin().lock();
++    let mut log = String::new();
++    read_input(&mut log, input)?;
++    let log_lines: Vec<&str> = log.lines().collect();
++    let mut vertical_size = terminal.size()?.height;
++
+     loop {
+-        terminal.draw(ui)?;
++        terminal.draw(|frame| simple_ui(frame, &log_lines[start_pos..(start_pos + vertical_size as usize)], &mut vertical_size))?;
+ 
+         if let Event::Key(key) = event::read()? {
+-            if let KeyCode::Char('q') = key.code {
+-                return Ok(());
++            match key.code {
++                KeyCode::Char('q') => return Ok(()),
++                KeyCode::Char('j') | KeyCode::Down => start_pos = increment(start_pos, 1),
++                KeyCode::Char('k') | KeyCode::Up => start_pos = decrement(start_pos, 1),
++                KeyCode::PageDown => start_pos = increment(start_pos, vertical_size as usize),
++                KeyCode::PageUp => start_pos = decrement(start_pos, vertical_size as usize),
++                _ => (),
+             }
+         }
+     }
+ }
+ 
+-fn ui<B: Backend>(f: &mut Frame<B>) {
+-    // Wrapping block for a group
+-    // Just draw the block and the group on the same area and build the group
+-    // with at least a margin of 1
+-    let size = f.size();
++fn simple_ui<B: Backend>(f: &mut Frame<B>, git_log: &[&str], vertical_size: &mut u16) {
++    let commit = r#"commit 2db54fed56a3b0ff2b326e75e2dcc4049718be0f
++Author: Mr. Example <mr@example.com.com>
++Date:   Tue Mar 28 21:33:18 2023 +0300
+ 
+-    // Surrounding block
+-    let block = Block::default()
+-        .borders(Borders::ALL)
+-        .title("Main block with round corners")
+-        .title_alignment(Alignment::Center)
+-        .border_type(BorderType::Rounded);
+-    f.render_widget(block, size);
++    Test tui
++        "#;
+ 
+     let chunks = Layout::default()
+         .direction(Direction::Vertical)
+-        .margin(4)
+-        .constraints([Constraint::Max(8), Constraint::Min(10)].as_ref())
++        .constraints(
++            [
++                Constraint::Max(commit.lines().count() as u16),
++                Constraint::Min(8),
++            ]
++            .as_ref(),
++        )
++        .margin(1)
+         .split(f.size());
+ 
+-    // Top two inner blocks
+-    let top_chunks = Layout::default()
+-        .direction(Direction::Horizontal)
+-        .constraints([Constraint::Percentage(100)].as_ref())
+-        .split(chunks[0]);
+-
+-    // Top right inner block with styled title aligned to the right
+-    let block = Block::default()
+-        .title(Span::styled(
+-            "Styled title",
+-            Style::default()
+-                .fg(Color::White)
+-                .bg(Color::Red)
+-                .add_modifier(Modifier::BOLD),
+-        ))
+-        .title_alignment(Alignment::Center);
+-    f.render_widget(block, top_chunks[0]);
+-
+-    // Bottom two inner blocks
+-    let bottom_chunks = Layout::default()
+-        .direction(Direction::Horizontal)
+-        .constraints([Constraint::Percentage(100)].as_ref())
+-        .split(chunks[1]);
+-
+-    // Bottom right block with styled left and right border
+-    let block = Block::default()
+-        .title("With styled borders and doubled borders")
+-        .border_style(Style::default().fg(Color::Cyan))
+-        .borders(Borders::all())
+-        .border_type(BorderType::Double);
+-    f.render_widget(block, bottom_chunks[0]);
+-}
++    let commit_paragraph = Paragraph::new(commit).block(
++        Block::default()
++            .borders(Borders::BOTTOM)
++            .border_type(BorderType::Double),
++    );
++    f.render_widget(commit_paragraph, chunks[0]);
+ 
++    let paragraph = Paragraph::new(git_log.join("\n")); //.scroll((*scroll, 0));
++    f.render_widget(paragraph, chunks[1]);
++    *vertical_size = chunks[1].height;
++}
+
+commit 96f57fbcd5a12a748b62521a446e5b18531704d6
+Author: Mr. Example <mr@example.com.com>
+Date:   Tue Mar 28 21:49:25 2023 +0300
+
+    WIP
+
+diff --git a/src/main.rs b/src/main.rs
+index 0c3a40b..61ff04b 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,8 +1,18 @@
+-use std::{io, thread, time::Duration};
+-
+-use crossterm::{execute, terminal::{disable_raw_mode, EnterAlternateScreen, enable_raw_mode, LeaveAlternateScreen}, event::{EnableMouseCapture, DisableMouseCapture}};
++use crossterm::{
++    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
++    execute,
++    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
++};
++use std::io;
+ use thiserror::Error;
+-use tui::{backend::CrosstermBackend, Terminal, widgets::{Borders, Block}};
++use tui::{
++    backend::{Backend, CrosstermBackend},
++    layout::{Alignment, Constraint, Direction, Layout},
++    style::{Color, Modifier, Style},
++    text::Span,
++    widgets::{Block, BorderType, Borders},
++    Frame, Terminal,
++};
+ 
+ #[derive(Error, Debug)]
+ enum RatError {
+@@ -17,15 +27,8 @@ fn main() -> Result<(), RatError> {
+     let backend = CrosstermBackend::new(stdout);
+     let mut terminal = Terminal::new(backend)?;
+ 
+-    terminal.draw(|f| {
+-        let size = f.size();
+-        let block = Block::default()
+-            .title("Block")
+-            .borders(Borders::ALL);
+-        f.render_widget(block, size);
+-    })?;
+-
+-    thread::sleep(Duration::from_millis(5000));
++    // create app and run it
++    let res = run_app(&mut terminal);
+ 
+     // restore terminal
+     disable_raw_mode()?;
+@@ -36,5 +39,75 @@ fn main() -> Result<(), RatError> {
+     )?;
+     terminal.show_cursor()?;
+ 
++    if let Err(err) = res {
++        println!("{:?}", err)
++    }
++
+     Ok(())
+ }
++
++fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
++    loop {
++        terminal.draw(ui)?;
++
++        if let Event::Key(key) = event::read()? {
++            if let KeyCode::Char('q') = key.code {
++                return Ok(());
++            }
++        }
++    }
++}
++
++fn ui<B: Backend>(f: &mut Frame<B>) {
++    // Wrapping block for a group
++    // Just draw the block and the group on the same area and build the group
++    // with at least a margin of 1
++    let size = f.size();
++
++    // Surrounding block
++    let block = Block::default()
++        .borders(Borders::ALL)
++        .title("Main block with round corners")
++        .title_alignment(Alignment::Center)
++        .border_type(BorderType::Rounded);
++    f.render_widget(block, size);
++
++    let chunks = Layout::default()
++        .direction(Direction::Vertical)
++        .margin(4)
++        .constraints([Constraint::Max(8), Constraint::Min(10)].as_ref())
++        .split(f.size());
++
++    // Top two inner blocks
++    let top_chunks = Layout::default()
++        .direction(Direction::Horizontal)
++        .constraints([Constraint::Percentage(100)].as_ref())
++        .split(chunks[0]);
++
++    // Top right inner block with styled title aligned to the right
++    let block = Block::default()
++        .title(Span::styled(
++            "Styled title",
++            Style::default()
++                .fg(Color::White)
++                .bg(Color::Red)
++                .add_modifier(Modifier::BOLD),
++        ))
++        .title_alignment(Alignment::Center);
++    f.render_widget(block, top_chunks[0]);
++
++    // Bottom two inner blocks
++    let bottom_chunks = Layout::default()
++        .direction(Direction::Horizontal)
++        .constraints([Constraint::Percentage(100)].as_ref())
++        .split(chunks[1]);
++
++    // Bottom right block with styled left and right border
++    let block = Block::default()
++        .title("With styled borders and doubled borders")
++        .border_style(Style::default().fg(Color::Cyan))
++        .borders(Borders::all())
++        .border_type(BorderType::Double);
++    f.render_widget(block, bottom_chunks[0]);
++}
++
+
+commit 2db54fed56a3b0ff2b326e75e2dcc4049718be0f
+Author: Mr. Example <mr@example.com.com>
+Date:   Tue Mar 28 21:33:18 2023 +0300
+
+    Test tui
+
+diff --git a/Cargo.toml b/Cargo.toml
+new file mode 100644
+index 0000000..a30a4b0
+--- /dev/null
++++ b/Cargo.toml
+@@ -0,0 +1,11 @@
++[package]
++name = "rat"
++version = "0.1.0"
++edition = "2021"
++
++# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
++
++[dependencies]
++crossterm = "0.26.1"
++thiserror = "1.0.40"
++tui = "0.19.0"
+diff --git a/src/main.rs b/src/main.rs
+new file mode 100644
+index 0000000..0c3a40b
+--- /dev/null
++++ b/src/main.rs
+@@ -0,0 +1,40 @@
++use std::{io, thread, time::Duration};
++
++use crossterm::{execute, terminal::{disable_raw_mode, EnterAlternateScreen, enable_raw_mode, LeaveAlternateScreen}, event::{EnableMouseCapture, DisableMouseCapture}};
++use thiserror::Error;
++use tui::{backend::CrosstermBackend, Terminal, widgets::{Borders, Block}};
++
++#[derive(Error, Debug)]
++enum RatError {
++    #[error("Could not initialize terminal")]
++    IoErr(#[from] io::Error),
++}
++
++fn main() -> Result<(), RatError> {
++    enable_raw_mode()?;
++    let mut stdout = io::stdout();
++    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
++    let backend = CrosstermBackend::new(stdout);
++    let mut terminal = Terminal::new(backend)?;
++
++    terminal.draw(|f| {
++        let size = f.size();
++        let block = Block::default()
++            .title("Block")
++            .borders(Borders::ALL);
++        f.render_widget(block, size);
++    })?;
++
++    thread::sleep(Duration::from_millis(5000));
++
++    // restore terminal
++    disable_raw_mode()?;
++    execute!(
++        terminal.backend_mut(),
++        LeaveAlternateScreen,
++        DisableMouseCapture
++    )?;
++    terminal.show_cursor()?;
++
++    Ok(())
++}

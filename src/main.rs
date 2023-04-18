@@ -1,0 +1,141 @@
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, BorderType, Borders, Paragraph},
+    Frame, Terminal,
+};
+use std::io::{self, stdin};
+
+use cpg::{parse_git_lines, read_input, CpgError};
+
+fn main() -> Result<(), CpgError> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // create app and run it
+    let res = run_app(&mut terminal);
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    if let Err(err) = res {
+        println!("{:?}", err)
+    }
+
+    Ok(())
+}
+
+fn decrement(scroll: usize, count: usize) -> usize {
+    if let Some(pos) = scroll.checked_sub(count) {
+        pos
+    } else {
+        0
+    }
+}
+
+fn increment(scroll: usize, count: usize, max_val: usize, vertical_size: u16) -> usize {
+    if let Some(pos) = scroll.checked_add(count) {
+        if pos > (max_val - vertical_size as usize) {
+            max_val - vertical_size as usize
+        } else {
+            pos
+        }
+    } else {
+        usize::MAX
+    }
+}
+
+fn get_lines<'a>(log_lines: &'a [&'a str], position: usize, vertical_size: u16) -> &'a [&'a str] {
+    let lines = if log_lines.len() > (position + vertical_size as usize) {
+        log_lines.get(position..(position + vertical_size as usize))
+    } else {
+        log_lines.get(position..(log_lines.len() - 1))
+    };
+    lines.unwrap()
+}
+
+fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
+    let mut position: usize = 0;
+    let input = stdin().lock();
+    let log = read_input(input)?;
+    let log_lines: Vec<&str> = log.lines().collect();
+    let mut vertical_size = terminal.size()?.height;
+
+    loop {
+        let commit_lines = parse_git_lines(&log_lines, position)?;
+        let commit = if let Some(lines) = commit_lines {
+            log_lines.get(lines.0..(lines.1 + 1))
+        } else {
+            None
+        };
+        let lines = get_lines(&log_lines, position, terminal.size()?.height);
+
+        terminal.draw(|frame| simple_ui(frame, lines, commit, &mut vertical_size))?;
+
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => return Ok(()),
+                KeyCode::Char('j') | KeyCode::Down => {
+                    position = increment(position, 1, log_lines.len(), vertical_size)
+                }
+                KeyCode::Char('k') | KeyCode::Up => position = decrement(position, 1),
+                KeyCode::PageDown => {
+                    position = increment(
+                        position,
+                        vertical_size as usize,
+                        log_lines.len(),
+                        vertical_size,
+                    )
+                }
+                KeyCode::PageUp => position = decrement(position, vertical_size as usize),
+                _ => (),
+            }
+        }
+    }
+}
+
+fn simple_ui<B: Backend>(
+    f: &mut Frame<B>,
+    git_log: &[&str],
+    commit: Option<&[&str]>,
+    vertical_size: &mut u16,
+) {
+    let commit_len = commit.map(|commit| commit.iter().len() + 1).unwrap_or(0);
+    let commit = commit.map(|commit| commit.join("\n"));
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Max(std::cmp::min(7, commit_len as u16)),
+                Constraint::Min(8),
+            ]
+            .as_ref(),
+        )
+        .margin(1)
+        .split(f.size());
+
+    let commit_paragraph = Paragraph::new(commit.unwrap_or("".to_string())).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_type(BorderType::Double),
+    );
+    f.render_widget(commit_paragraph, chunks[0]);
+
+    let paragraph = Paragraph::new(git_log.join("\n")); //.scroll((*scroll, 0));
+    f.render_widget(paragraph, chunks[1]);
+    *vertical_size = chunks[1].height;
+}
