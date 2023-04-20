@@ -1,4 +1,5 @@
 use std::io::{self, BufRead};
+use std::sync::mpsc;
 
 use regex::Regex;
 use thiserror::Error;
@@ -7,9 +8,13 @@ use thiserror::Error;
 pub enum CpgError {
     #[error("Could not initialize terminal")]
     IoErr(#[from] io::Error),
+    #[error("Could not read input")]
+    StremingReceiveError(#[from] mpsc::RecvError),
+    #[error("Could not send input to terminal")]
+    StremingSendError,
 }
 
-pub fn parse_git_lines(lines: &[&str], pos: usize) -> Result<Option<(usize, usize)>, CpgError> {
+pub fn parse_git_lines(lines: &[String], pos: usize) -> Result<Option<(usize, usize)>, CpgError> {
     let commit_start_regex = r"^commit [0-9a-fA-F]{40}";
     let commit_end_regex = r"^(commit [0-9a-fA-F]{40}|diff --git)";
 
@@ -65,7 +70,7 @@ mod test {
     #[test]
     fn find_commit_from_start() {
         let lines = GIT_LOG.lines();
-        let input: Vec<&str> = lines.collect();
+        let input: Vec<String> = lines.map(|l| l.to_string()).collect();
         let commit_pos = parse_git_lines(&input, 0).unwrap();
         assert!(commit_pos.is_none());
     }
@@ -73,7 +78,7 @@ mod test {
     #[test]
     fn find_commit_from_end() {
         let lines = GIT_LOG.lines();
-        let input: Vec<&str> = lines.collect();
+        let input: Vec<String> = lines.map(|l| l.to_string()).collect();
         let (start, end) = parse_git_lines(&input, input.len() - 1).unwrap().unwrap();
         dbg!(start);
         dbg!(end);
@@ -82,7 +87,7 @@ mod test {
     #[test]
     fn find_commit_patch_from_start() {
         let lines = GIT_LOG.lines();
-        let input: Vec<&str> = lines.collect();
+        let input: Vec<String> = lines.map(|l| l.to_string()).collect();
         let commit_pos = parse_git_lines(&input, 0).unwrap();
         assert!(commit_pos.is_none());
     }
@@ -90,7 +95,7 @@ mod test {
     #[test]
     fn find_commit_patch_first() {
         let lines = GIT_LOG.lines();
-        let input: Vec<&str> = lines.collect();
+        let input: Vec<String> = lines.map(|l| l.to_string()).collect();
         let (start, end) = parse_git_lines(&input, 10).unwrap().unwrap();
         dbg!(start);
         dbg!(end);
@@ -100,7 +105,7 @@ mod test {
     #[test]
     fn find_commit_patch() {
         let lines = GIT_LOG.lines();
-        let input: Vec<&str> = lines.collect();
+        let input: Vec<String> = lines.map(|l| l.to_string()).collect();
         let (start, end) = parse_git_lines(&input, input.len() - 1).unwrap().unwrap();
         dbg!(start);
         dbg!(end);

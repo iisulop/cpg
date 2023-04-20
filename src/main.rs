@@ -9,11 +9,19 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame, Terminal,
 };
-use std::io::{self, stdin};
+use std::{
+    fs::File,
+    io::{self, stdin, BufRead},
+    sync::mpsc::{channel, Receiver},
+    thread::{self, JoinHandle},
+};
 
-use cpg::{parse_git_lines, read_input, CpgError};
+use cpg::{parse_git_lines, CpgError};
+use tracing::error;
 
 fn main() -> Result<(), CpgError> {
+    let fout = File::create("run.log")?;
+    tracing_subscriber::fmt::fmt().with_writer(fout).init();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -33,7 +41,7 @@ fn main() -> Result<(), CpgError> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{:?}", err)
+        error!("{:?}", err)
     }
 
     Ok(())
@@ -59,7 +67,42 @@ fn increment(scroll: usize, count: usize, max_val: usize, vertical_size: u16) ->
     }
 }
 
-fn get_lines<'a>(log_lines: &'a [&'a str], position: usize, vertical_size: u16) -> &'a [&'a str] {
+fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, CpgError>>, JoinHandle<()>) {
+    let (tx, rx) = channel::<Result<Vec<String>, CpgError>>();
+    let thread_handle = thread::spawn(move || {
+        let input = stdin().lock();
+        let mut input_lines = input.split(b'\n');
+
+        loop {
+            let mut maybe_err = None;
+            let mut lines = Vec::with_capacity(num_lines);
+            for _ in 0..num_lines {
+                match input_lines.next() {
+                    Some(Ok(buf)) => {
+                        let line = String::from_utf8_lossy(&buf).to_string();
+                        lines.push(line);
+                    }
+                    Some(Err(err)) => {
+                        maybe_err = Some(err);
+                        break;
+                    }
+                    None => return,
+                }
+            }
+            if let Err(_err) = tx.send(Ok(lines)) {
+                return;
+            }
+            if let Some(_read_err) = maybe_err {
+                if let Err(_send_err) = tx.send(Err(CpgError::StremingSendError)) {
+                    return;
+                }
+            };
+        }
+    });
+    (rx, thread_handle)
+}
+
+fn get_lines(log_lines: &[String], position: usize, vertical_size: u16) -> &[String] {
     let lines = if log_lines.len() > (position + vertical_size as usize) {
         log_lines.get(position..(position + vertical_size as usize))
     } else {
@@ -70,19 +113,25 @@ fn get_lines<'a>(log_lines: &'a [&'a str], position: usize, vertical_size: u16) 
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
     let mut position: usize = 0;
-    let input = stdin().lock();
-    let log = read_input(input)?;
-    let log_lines: Vec<&str> = log.lines().collect();
     let mut vertical_size = terminal.size()?.height;
+    let (rx, _thread_handle) = stream_input((vertical_size as usize) * 4);
+    let mut log_lines = rx.recv()??;
 
     loop {
-        let commit_lines = parse_git_lines(&log_lines, position)?;
+        log_lines = match rx.try_recv() {
+            Ok(maybe_new_lines) => {
+                log_lines.extend(maybe_new_lines?.into_iter());
+                log_lines
+            }
+            Err(_) => log_lines,
+        };
+        let commit_lines = parse_git_lines(&log_lines[..], position)?;
         let commit = if let Some(lines) = commit_lines {
             log_lines.get(lines.0..(lines.1 + 1))
         } else {
             None
         };
-        let lines = get_lines(&log_lines, position, terminal.size()?.height);
+        let lines = get_lines(&log_lines[..], position, terminal.size()?.height);
 
         terminal.draw(|frame| simple_ui(frame, lines, commit, &mut vertical_size))?;
 
@@ -110,8 +159,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
 
 fn simple_ui<B: Backend>(
     f: &mut Frame<B>,
-    git_log: &[&str],
-    commit: Option<&[&str]>,
+    git_log: &[String],
+    commit: Option<&[String]>,
     vertical_size: &mut u16,
 ) {
     let commit_len = commit.map(|commit| commit.iter().len() + 1).unwrap_or(0);
