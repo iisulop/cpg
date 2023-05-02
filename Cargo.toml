@@ -1,6 +1,6 @@
 [package]
 name = "cpg"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 license = "MIT"
 description = "Context aware pager"
@@ -8,6 +8,12 @@ repository = "https://github.com/iisulop/cpg"
 readme = "README.md"
 categories = ["command-line-utilities"]
 keywords = ["pager"]
+exclude = [
+  "**/*.orig",
+  "*.orig",
+  "tests/",
+  "img/",
+]
 
 [dependencies]
 crossterm = "0.26.1"
