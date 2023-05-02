@@ -94,7 +94,7 @@ fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, Error>>, Join
                 return;
             }
             if let Some(_read_err) = maybe_err {
-                if let Err(_send_err) = tx.send(Err(Error::StreamingSendError)) {
+                if let Err(_send_err) = tx.send(Err(Error::StreamingSend)) {
                     return;
                 }
             };
