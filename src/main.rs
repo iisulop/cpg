@@ -1,8 +1,15 @@
+//!
+
+mod context_finder;
+mod error;
+
+use context_finder::{ContextFinder, InputType};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use error::CpgError;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
@@ -10,28 +17,22 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::{
-    fs::File,
     io::{self, stdin, BufRead},
     sync::mpsc::{channel, Receiver},
     thread::{self, JoinHandle},
 };
 
-use cpg::{parse_git_lines, CpgError};
 use tracing::error;
 
 fn main() -> Result<(), CpgError> {
-    let fout = File::create("run.log")?;
-    tracing_subscriber::fmt::fmt().with_writer(fout).init();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // create app and run it
     let res = run_app(&mut terminal);
 
-    // restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -93,7 +94,7 @@ fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, CpgError>>, J
                 return;
             }
             if let Some(_read_err) = maybe_err {
-                if let Err(_send_err) = tx.send(Err(CpgError::StremingSendError)) {
+                if let Err(_send_err) = tx.send(Err(CpgError::StreamingSendError)) {
                     return;
                 }
             };
@@ -115,38 +116,34 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
     let mut position: usize = 0;
     let mut vertical_size = terminal.size()?.height;
     let (rx, _thread_handle) = stream_input((vertical_size as usize) * 4);
-    let mut log_lines = rx.recv()??;
+    let mut all_lines = rx.recv()??;
+    let cf = ContextFinder::new(InputType::Git)?;
 
     loop {
-        log_lines = match rx.try_recv() {
+        all_lines = match rx.try_recv() {
             Ok(maybe_new_lines) => {
-                log_lines.extend(maybe_new_lines?.into_iter());
-                log_lines
+                all_lines.extend(maybe_new_lines?.into_iter());
+                all_lines
             }
-            Err(_) => log_lines,
+            Err(_) => all_lines,
         };
-        let commit_lines = parse_git_lines(&log_lines[..], position)?;
-        let commit = if let Some(lines) = commit_lines {
-            log_lines.get(lines.0..(lines.1 + 1))
-        } else {
-            None
-        };
-        let lines = get_lines(&log_lines[..], position, terminal.size()?.height);
+        let context = cf.get_context(&all_lines[..], position);
+        let lines = get_lines(&all_lines[..], position, terminal.size()?.height);
 
-        terminal.draw(|frame| simple_ui(frame, lines, commit, &mut vertical_size))?;
+        terminal.draw(|frame| pager(frame, lines, context, &mut vertical_size))?;
 
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
                 KeyCode::Char('j') | KeyCode::Down => {
-                    position = increment(position, 1, log_lines.len(), vertical_size)
+                    position = increment(position, 1, all_lines.len(), vertical_size)
                 }
                 KeyCode::Char('k') | KeyCode::Up => position = decrement(position, 1),
                 KeyCode::PageDown => {
                     position = increment(
                         position,
                         vertical_size as usize,
-                        log_lines.len(),
+                        all_lines.len(),
                         vertical_size,
                     )
                 }
@@ -157,7 +154,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
     }
 }
 
-fn simple_ui<B: Backend>(
+fn pager<B: Backend>(
     f: &mut Frame<B>,
     git_log: &[String],
     commit: Option<&[String]>,

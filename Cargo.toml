@@ -2,8 +2,12 @@
 name = "cpg"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+description = "Context aware pager"
+repository = "https://github.com/iisulop/cpg"
+readme = "README.md"
+categories = ["command-line-utilities"]
+keywords = ["pager"]
 
 [dependencies]
 crossterm = "0.26.1"
@@ -15,3 +19,7 @@ tracing-subscriber = "0.3.16"
 
 [profile.release]
 debug = true
+
+[[bin]]
+name = "cpg"
+path = "src/main.rs"
