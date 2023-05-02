@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum CpgError {
+pub enum Error {
     #[error("Could not initialize terminal")]
     IoErr(#[from] io::Error),
     #[error("Could not read input")]

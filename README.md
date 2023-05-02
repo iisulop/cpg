@@ -1,7 +1,7 @@
-cpg is a context aware pager
+cag is a context aware pager
 
-Usage: `git diff --patch | cpg`
+Usage: `git diff --patch | cag`
 
-cpg is a pager keeping track and displaying the currently viewed git commit.
+cag is a pager keeping track and displaying the currently viewed git commit.
 
-![Screenshot of cpg](img/example.png)
+![Screenshot of cag](img/example.png)

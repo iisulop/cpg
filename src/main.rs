@@ -9,7 +9,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use error::CpgError;
+use error::Error;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
@@ -24,7 +24,7 @@ use std::{
 
 use tracing::error;
 
-fn main() -> Result<(), CpgError> {
+fn main() -> Result<(), Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -68,8 +68,8 @@ fn increment(scroll: usize, count: usize, max_val: usize, vertical_size: u16) ->
     }
 }
 
-fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, CpgError>>, JoinHandle<()>) {
-    let (tx, rx) = channel::<Result<Vec<String>, CpgError>>();
+fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, Error>>, JoinHandle<()>) {
+    let (tx, rx) = channel::<Result<Vec<String>, Error>>();
     let thread_handle = thread::spawn(move || {
         let input = stdin().lock();
         let mut input_lines = input.split(b'\n');
@@ -94,7 +94,7 @@ fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, CpgError>>, J
                 return;
             }
             if let Some(_read_err) = maybe_err {
-                if let Err(_send_err) = tx.send(Err(CpgError::StreamingSendError)) {
+                if let Err(_send_err) = tx.send(Err(Error::StreamingSendError)) {
                     return;
                 }
             };
@@ -112,7 +112,7 @@ fn get_lines(log_lines: &[String], position: usize, vertical_size: u16) -> &[Str
     lines.unwrap()
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), CpgError> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
     let mut position: usize = 0;
     let mut vertical_size = terminal.size()?.height;
     let (rx, _thread_handle) = stream_input((vertical_size as usize) * 4);

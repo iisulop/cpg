@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use regex::Regex;
 
-use crate::error::CpgError;
+use crate::error::Error;
 
 pub enum InputType {
     Git,
@@ -14,7 +14,7 @@ pub struct ContextFinder {
 }
 
 impl ContextFinder {
-    pub fn new(input_type: InputType) -> Result<Self, CpgError> {
+    pub fn new(input_type: InputType) -> Result<Self, Error> {
         match input_type {
             InputType::Git => {
                 let start = Regex::new(r"^commit [0-9a-fA-F]{40}").unwrap();
@@ -90,11 +90,11 @@ impl ContextFinder {
 mod test {
     use std::io::BufRead;
 
-    use crate::{context_finder::ContextFinder, error::CpgError};
+    use crate::{context_finder::ContextFinder, error::Error};
 
     pub const GIT_LOG: &str = include_str!("../tests/data/git_patch");
 
-    fn read_input<R: BufRead>(mut reader: R) -> Result<String, CpgError> {
+    fn read_input<R: BufRead>(mut reader: R) -> Result<String, Error> {
         let mut buf: Vec<u8> = Vec::new();
         reader.read_to_end(&mut buf)?;
         let result = String::from_utf8_lossy(&buf);
