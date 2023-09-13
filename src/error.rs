@@ -11,4 +11,6 @@ pub enum Error {
     StreamingReceive(#[from] mpsc::RecvError),
     #[error("Could not send input to terminal")]
     StreamingSend,
+    #[error("Timeout while waiting for input stream")]
+    StreamingTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
 }

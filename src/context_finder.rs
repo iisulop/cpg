@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use regex::Regex;
+use tracing::trace;
 
 use crate::error::Error;
 
@@ -17,6 +18,7 @@ impl ContextFinder {
     pub fn new(input_type: InputType) -> Result<Self, Error> {
         match input_type {
             InputType::Git => {
+                trace!("Creating GIT context finder");
                 let start = Regex::new(r"^commit [0-9a-fA-F]{40}").unwrap();
                 let end = Regex::new(r"^(commit [0-9a-fA-F]{40}|diff --git)").unwrap();
                 Ok(ContextFinder { start, end })
@@ -29,6 +31,7 @@ impl ContextFinder {
         all_lines: &'a [String],
         position: usize,
     ) -> Option<&'a [String]> {
+        trace!("Finding context");
         let context_lines = self.find_range(all_lines, position);
         if let Some(lines) = context_lines {
             all_lines.get(lines.start..(lines.end + 1))
@@ -58,6 +61,7 @@ impl ContextFinder {
     }
 
     fn start_line_num(&self, lines: &[String], start_position: usize) -> Option<usize> {
+        trace!("Looking for start line");
         let pos = lines.get(0..start_position).map(|lines| {
             lines
                 .iter()
@@ -74,6 +78,7 @@ impl ContextFinder {
         start_position: usize,
         start_line_num: usize,
     ) -> Option<usize> {
+        trace!("Looking for end line");
         let pos = lines
             .get((start_line_num + 1)..start_position)
             .map(|lines| {

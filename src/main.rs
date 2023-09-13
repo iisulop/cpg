@@ -18,13 +18,26 @@ use ratatui::{
 };
 use std::{
     io::{self, stdin, BufRead},
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{channel, Receiver, TryRecvError},
     thread::{self, JoinHandle},
+    time::Duration,
 };
+use tracing::{error, trace, warn, Level};
 
-use tracing::error;
+const INPUT_STREAM_TIMEOUT: u64 = 1000;
+const ENVIRONMENT_VARIABLE_ENABLE_TRACING: &str = "ENABLE_TRACING";
 
 fn main() -> Result<(), Error> {
+    if let Ok(enable_tracing) = std::env::var(ENVIRONMENT_VARIABLE_ENABLE_TRACING) {
+        if enable_tracing == "1" || &enable_tracing.to_lowercase() == "true" {
+            let file_appender = tracing_appender::rolling::hourly("./.logs/", "runlog");
+            tracing_subscriber::fmt()
+                .with_max_level(Level::TRACE)
+                .with_writer(file_appender)
+                .init();
+        }
+    }
+    trace!("Enabling raw mode");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -32,6 +45,8 @@ fn main() -> Result<(), Error> {
     let mut terminal = Terminal::new(backend)?;
 
     let res = run_app(&mut terminal);
+
+    trace!("Disabling raw mode");
 
     disable_raw_mode()?;
     execute!(
@@ -42,7 +57,8 @@ fn main() -> Result<(), Error> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        error!("{:?}", err)
+        error!("{:?}", err);
+        eprintln!("{err}");
     }
 
     Ok(())
@@ -69,31 +85,42 @@ fn increment(scroll: usize, count: usize, max_val: usize, vertical_size: u16) ->
 }
 
 fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, Error>>, JoinHandle<()>) {
+    trace!("Opening channel for input reader");
     let (tx, rx) = channel::<Result<Vec<String>, Error>>();
     let thread_handle = thread::spawn(move || {
+        trace!("Reading input");
         let input = stdin().lock();
+        trace!("Splitting input");
         let mut input_lines = input.split(b'\n');
 
         loop {
+            trace!("Reading lines");
             let mut maybe_err = None;
             let mut lines = Vec::with_capacity(num_lines);
             for _ in 0..num_lines {
                 match input_lines.next() {
                     Some(Ok(buf)) => {
+                        trace!("Got lines");
                         let line = String::from_utf8_lossy(&buf).to_string();
                         lines.push(line);
                     }
                     Some(Err(err)) => {
+                        warn!("Error reading input lines: {err}");
                         maybe_err = Some(err);
                         break;
                     }
-                    None => return,
+                    None => {
+                        trace!("No new lines");
+                        return;
+                    }
                 }
             }
-            if let Err(_err) = tx.send(Ok(lines)) {
+            if let Err(err) = tx.send(Ok(lines)) {
+                warn!("Error sending input streaming result: {err}");
                 return;
             }
-            if let Some(_read_err) = maybe_err {
+            if let Some(read_err) = maybe_err {
+                warn!("Got read error streaming input: {read_err}");
                 if let Err(_send_err) = tx.send(Err(Error::StreamingSend)) {
                     return;
                 }
@@ -104,6 +131,7 @@ fn stream_input(num_lines: usize) -> (Receiver<Result<Vec<String>, Error>>, Join
 }
 
 fn get_lines(log_lines: &[String], position: usize, vertical_size: u16) -> &[String] {
+    trace!("Getting screenful of lines");
     let lines = if log_lines.len() > (position + vertical_size as usize) {
         log_lines.get(position..(position + vertical_size as usize))
     } else {
@@ -116,16 +144,21 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
     let mut position: usize = 0;
     let mut vertical_size = terminal.size()?.height;
     let (rx, _thread_handle) = stream_input((vertical_size as usize) * 4);
-    let mut all_lines = rx.recv()??;
+    let mut all_lines = rx.recv_timeout(Duration::from_millis(INPUT_STREAM_TIMEOUT))??;
     let cf = ContextFinder::new(InputType::Git)?;
 
     loop {
         all_lines = match rx.try_recv() {
             Ok(maybe_new_lines) => {
-                all_lines.extend(maybe_new_lines?.into_iter());
+                trace!("Got more lines");
+                all_lines.extend(maybe_new_lines?);
                 all_lines
             }
-            Err(_) => all_lines,
+            Err(TryRecvError::Disconnected) => all_lines,
+            Err(e) => {
+                warn!("Got error receiving new lines: {e}");
+                all_lines
+            }
         };
         let context = cf.get_context(&all_lines[..], position);
         let lines = get_lines(&all_lines[..], position, terminal.size()?.height);
@@ -160,6 +193,7 @@ fn pager<B: Backend>(
     commit: Option<&[String]>,
     vertical_size: &mut u16,
 ) {
+    trace!("Rendering screen");
     let commit_len = commit.map(|commit| commit.iter().len() + 1).unwrap_or(0);
     let commit = commit.map(|commit| commit.join("\n"));
     let chunks = Layout::default()
