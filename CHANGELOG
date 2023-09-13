@@ -1,0 +1,11 @@
+# Changelog
+
+## [0.0.2] - 2023-09-13
+
+### Added:
+
+- Add tracing support
+
+### Fixed
+
+- Stop hanging on empty stdin
