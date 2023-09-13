@@ -7,6 +7,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("Could not initialize terminal")]
     Io(#[from] io::Error),
+    #[error("Error with search term")]
+    SearchTerm(#[from] aho_corasick::BuildError),
     #[error("Could not read input")]
     StreamingReceive(#[from] mpsc::RecvError),
     #[error("Could not send input to terminal")]

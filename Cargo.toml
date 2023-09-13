@@ -16,13 +16,15 @@ exclude = [
 ]
 
 [dependencies]
-crossterm = "0.26.1"
-ratatui = "0.20.1"
+aho-corasick = "1.0.5"
+crossterm = "0.27.0"
+ratatui = "0.23.0"
 regex = "1.7.3"
 thiserror = "1.0.40"
 tracing = "0.1.37"
 tracing-appender = "0.2.2"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+tui-input = "0.8.0"
 
 [[bin]]
 name = "cag"
