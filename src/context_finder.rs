@@ -15,12 +15,12 @@ pub struct ContextFinder {
 }
 
 impl ContextFinder {
-    pub fn new(input_type: InputType) -> Result<Self, Error> {
+    pub fn new(input_type: &InputType) -> Result<Self, Error> {
         match input_type {
             InputType::Git => {
                 trace!("Creating GIT context finder");
-                let start = Regex::new(r"^commit [0-9a-fA-F]{40}").unwrap();
-                let end = Regex::new(r"^(commit [0-9a-fA-F]{40}|diff --git)").unwrap();
+                let start = Regex::new(r"^commit [0-9a-fA-F]{40}")?;
+                let end = Regex::new(r"^(commit [0-9a-fA-F]{40}|diff --git)")?;
                 Ok(ContextFinder { start, end })
             }
         }
@@ -34,7 +34,7 @@ impl ContextFinder {
         trace!("Finding context");
         let context_lines = self.find_range(all_lines, position);
         if let Some(lines) = context_lines {
-            all_lines.get(lines.start..(lines.end + 1))
+            all_lines.get(lines.start..=lines.end + 1)
         } else {
             None
         }
